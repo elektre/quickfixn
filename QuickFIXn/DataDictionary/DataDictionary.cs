@@ -103,7 +103,8 @@ namespace QuickFix.DataDictionary
 				sessionDataDict.Iterate(message.Trailer, msgType);
 			}
 
-			appDataDict.Iterate(message, msgType);
+		    if (appDataDict != null)
+		        appDataDict.Iterate(message, msgType);
 		}
 
 		public void Validate(Message message, string beginString, string msgType)
@@ -134,10 +135,9 @@ namespace QuickFix.DataDictionary
 
 		public DDMap GetMapForMessage(string msgType)
 		{
-			if(Messages.ContainsKey(msgType)) {
-				return Messages[msgType];
-			}
-			return null;
+		    DDMap dd;
+		    Messages.TryGetValue(msgType, out dd);
+			return dd;
 		}
 
 		public void CheckMsgType(string msgType)
@@ -207,7 +207,7 @@ namespace QuickFix.DataDictionary
 			// check contents of each group
 			foreach (int groupTag in map.GetGroupTags())
 			{
-				for (int i = 1; i <= map.GroupCount(groupTag); i++)
+				for (int i = 1; i <= map.GroupCount(groupTag); ++i)
 				{
 					Group g = map.GetGroup(i, groupTag);
 					DDGrp ddg = this.Messages[msgType].GetGroup(groupTag);
@@ -247,7 +247,7 @@ namespace QuickFix.DataDictionary
 			// check contents of each nested group
 			foreach (int groupTag in group.GetGroupTags())
 			{
-				for (int i = 1; i <= group.GroupCount(groupTag); i++)
+				for (int i = 1; i <= group.GroupCount(groupTag); ++i)
 				{
 					Group g = group.GetGroup(i, groupTag);
 					DDGrp ddg = ddgroup.GetGroup(groupTag);
@@ -307,10 +307,10 @@ namespace QuickFix.DataDictionary
 
 		public bool TryGetFieldType(int tag, out Type result)
 		{
-			
-			if (FieldsByTag.ContainsKey(tag))
+		    DDField field;
+			if (FieldsByTag.TryGetValue(tag, out field))
 			{
-				result = FieldsByTag[tag].FieldType;
+				result = field.FieldType;
 				return true;
 			}
 			result = null;
@@ -357,9 +357,8 @@ namespace QuickFix.DataDictionary
 		public void CheckIsInMessage(Fields.IField field, string msgType)
 		{
 			DDMap dd;
-			if (Messages.TryGetValue(msgType, out dd))
-				if (dd.Fields.ContainsKey(field.Tag))
-					return;
+		    if (Messages.TryGetValue(msgType, out dd) && dd.Fields.ContainsKey(field.Tag))
+		        return;
 			throw new TagNotDefinedForMessage(field.Tag, msgType);
 		}
 
@@ -376,30 +375,24 @@ namespace QuickFix.DataDictionary
 			throw new TagNotDefinedForMessage(field.Tag, msgType);
 		}
 
-		/// <summary>
-		/// If <paramref name="field"/> is a group-counter for <paramref name="msgType"/>, check that it is accurate, else do nothing.
-		/// </summary>
-		/// <param name="field">a group's counter field</param>
-		/// <param name="map">the FieldMap that contains the group being checked</param>
-		/// <param name="msgType">msg type of message that is/contains <paramref name="map"/></param>
-		public void CheckGroupCount(Fields.IField field, FieldMap map, string msgType)
-		{
-			if(IsGroup(msgType, field.Tag))
-			{
-				if (map.GetInt(field.Tag) != map.GroupCount(field.Tag))
-				{
-					throw new RepeatingGroupCountMismatch(field.Tag);
-				}
-			}
-		}
+	    /// <summary>
+	    /// If <paramref name="field"/> is a group-counter for <paramref name="msgType"/>, check that it is accurate, else do nothing.
+	    /// </summary>
+	    /// <param name="field">a group's counter field</param>
+	    /// <param name="map">the FieldMap that contains the group being checked</param>
+	    /// <param name="msgType">msg type of message that is/contains <paramref name="map"/></param>
+	    public void CheckGroupCount(Fields.IField field, FieldMap map, string msgType)
+	    {
+	        if (IsGroup(msgType, field.Tag) && map.GetInt(field.Tag) != map.GroupCount(field.Tag))
+	        {
+	            throw new RepeatingGroupCountMismatch(field.Tag);
+	        }
+	    }
 
-		public bool IsGroup(string msgType, int tag)
+	    public bool IsGroup(string msgType, int tag)
 		{
-			if (Messages.ContainsKey(msgType))
-			{
-				return Messages[msgType].IsGroup(tag);
-			}
-			return false;
+		    DDMap dd;
+			return Messages.TryGetValue(msgType, out dd) && dd.IsGroup(tag);
 		}
 
 		/// <summary>
@@ -409,9 +402,7 @@ namespace QuickFix.DataDictionary
 		/// <returns></returns>
 		public bool ShouldCheckTag(Fields.IField field)
 		{
-			if (!this.CheckUserDefinedFields && (field.Tag >= Fields.Limits.USER_MIN))
-				return false;
-			return true;
+		    return this.CheckUserDefinedFields || field.Tag < Fields.Limits.USER_MIN;
 		}
 
 		public bool IsHeaderField(int tag)
@@ -442,11 +433,13 @@ namespace QuickFix.DataDictionary
 			parseTrailer(doc);
 		}
 
-		public Boolean FieldHasValue(int tag, String val) {
+		public Boolean FieldHasValue(int tag, String val)
+        {
 			return FieldsByTag[tag].EnumDict.ContainsKey(val);
 		}
 
-		private void setVersionInfo(XmlDocument doc) {
+		private void setVersionInfo(XmlDocument doc)
+        {
 			MajorVersion = doc.SelectSingleNode("/fix/@major").Value;
 			MinorVersion = doc.SelectSingleNode("/fix/@minor").Value;
 			string type;
@@ -456,16 +449,16 @@ namespace QuickFix.DataDictionary
 			else
 				type = node.Value;
 			
-			
 			if (!type.Equals("FIX") && !type.Equals("FIXT"))
-				throw new System.ArgumentException("Type must be FIX of FIXT in cofig");
+				throw new System.ArgumentException("Type must be FIX of FIXT in config");
 			Version = String.Format("{0}.{1}.{2}", type, MajorVersion, MinorVersion);
 		}
 
 		private void parseFields(XmlDocument doc)
 		{
 			XmlNodeList nodeList = doc.SelectNodes("//fields/field");
-			foreach(XmlNode fldEl in nodeList) {
+			foreach(XmlNode fldEl in nodeList)
+            {
 				DDField fld = newField(fldEl);
 				FieldsByTag[fld.Tag] = fld;
 				FieldsByName[fld.Name] = fld;
@@ -543,7 +536,9 @@ namespace QuickFix.DataDictionary
             Console.WriteLine(s);
             */
 
-			if (!node.HasChildNodes) { return; }
+		    if (!node.HasChildNodes)
+		        return;
+
 			foreach (XmlNode childNode in node.ChildNodes)
 			{
                 /*
@@ -554,53 +549,59 @@ namespace QuickFix.DataDictionary
                 Console.WriteLine(s);
                 */
 
-				if( childNode.Name == "field" )
+				switch (childNode.Name)
 				{
-					DDField fld = FieldsByName[childNode.Attributes["name"].Value];
-                    XmlAttribute req = childNode.Attributes["required"];
-                    if (req != null && req.Value == "Y"
-                        && (componentRequired == null || componentRequired.Value == true))
-                    {
-                        ddmap.ReqFields.Add(fld.Tag);
-                    }
-					if (!ddmap.IsField(fld.Tag))
-					{
-						ddmap.Fields.Add(fld.Tag, fld);
-					}
+				    case "field":
+				    {
+				        DDField fld = FieldsByName[childNode.Attributes["name"].Value];
+				        XmlAttribute req = childNode.Attributes["required"];
+				        if (req != null && req.Value == "Y"
+				            && (componentRequired == null || componentRequired.Value == true))
+				        {
+				            ddmap.ReqFields.Add(fld.Tag);
+				        }
+				        if (!ddmap.IsField(fld.Tag))
+				        {
+				            ddmap.Fields.Add(fld.Tag, fld);
+				        }
 
-					// if first field in group, make it the DELIM
-					if ((ddmap.GetType() == typeof(DDGrp) && ((DDGrp)ddmap).Delim == 0))
-					{
-						((DDGrp)ddmap).Delim = fld.Tag;
-					}
+				        // if first field in group, make it the DELIM
+				        if ((ddmap.GetType() == typeof(DDGrp) && ((DDGrp)ddmap).Delim == 0))
+				        {
+				            ((DDGrp)ddmap).Delim = fld.Tag;
+				        }
+				    }
+				    break;
+				    case "group":
+				    {
+				        DDField fld = FieldsByName[childNode.Attributes["name"].Value];
+				        DDGrp grp = new DDGrp();
+				        XmlAttribute req = childNode.Attributes["required"];
+				        if (req != null && req.Value == "Y"
+				            && (componentRequired == null || componentRequired.Value == true))
+				        {
+				            ddmap.ReqFields.Add(fld.Tag);
+				            grp.Required = true;
+				        }
+				        if (!ddmap.IsField(fld.Tag))
+				        {
+				            ddmap.Fields.Add(fld.Tag, fld);
+				        }
+				        grp.NumFld = fld.Tag; 
+				        parseMsgEl(childNode, grp);
+				        ddmap.Groups.Add(fld.Tag, grp);
+				    }
+				    break;
+				    case "component":
+				    {
+				        String name = childNode.Attributes["name"].Value;
+				        XmlNode compNode = RootDoc.SelectSingleNode("//components/component[@name='" + name + "']");
+				        XmlAttribute req = childNode.Attributes["required"];
+				        bool? compRequired = (req != null && req.Value == "Y");
+				        parseMsgEl(compNode, ddmap, compRequired);
+				    }
+				    break;
 				}
-				else if(childNode.Name == "group")
-				{
-					DDField fld = FieldsByName[childNode.Attributes["name"].Value];
-					DDGrp grp = new DDGrp();
-                    XmlAttribute req = childNode.Attributes["required"];
-                    if (req != null && req.Value == "Y"
-                        && (componentRequired == null || componentRequired.Value == true))
-					{
-						ddmap.ReqFields.Add(fld.Tag);
-						grp.Required = true;
-					}
-					if (!ddmap.IsField(fld.Tag))
-					{
-						ddmap.Fields.Add(fld.Tag, fld);
-					}
-					grp.NumFld = fld.Tag; 
-					parseMsgEl(childNode, grp);
-					ddmap.Groups.Add(fld.Tag, grp);
-				}
-                else if (childNode.Name == "component")
-                {
-                    String name = childNode.Attributes["name"].Value;
-                    XmlNode compNode = RootDoc.SelectSingleNode("//components/component[@name='" + name + "']");
-                    XmlAttribute req = childNode.Attributes["required"];
-                    bool? compRequired = (req != null && req.Value == "Y");
-                    parseMsgEl(compNode, ddmap, compRequired);
-                }
 			}
 		}
 	}
